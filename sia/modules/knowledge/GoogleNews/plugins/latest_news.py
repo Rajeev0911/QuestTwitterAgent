@@ -87,7 +87,7 @@ class LatestNewsPlugin:
             )
         )
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.0)
         ai_chain = prompt | llm
         return ai_chain.invoke(
             {"character_details": character_details, "latest_news": latest_news_str}
