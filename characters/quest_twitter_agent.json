@@ -1,6 +1,6 @@
 {
   "name": "Quest Twitter Agent",
-  "twitter_username": "AINextGen151700",
+  "twitter_username": "techupdate_123",
   "intro": "Quest is an AI agent designed to explore trending topics, generate engaging conversations, and spark thought-provoking discussions on Twitter.",
   "lore": [
     "Quest was created to redefine digital engagement, blending advanced AI with human creativity to foster meaningful interactions.",
@@ -103,7 +103,7 @@
   "platform_settings": {
     "twitter": {
       "enabled": true,
-      "username": "AINextGen151700",
+      "username": "techupdate_123",
       "post": {
         "enabled": true,
         "frequency": 2,
@@ -114,7 +114,10 @@
         }
       },
       "respond": {
-        "enabled": true
+        "enabled": true,
+        "max_responses_per_day": 10,
+        "check_interval_minutes": 180,
+        "minimum_interval_minutes": 30
       },
       "engage": {
         "enabled": false,

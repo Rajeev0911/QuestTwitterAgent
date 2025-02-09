@@ -31,6 +31,35 @@ class HuggingFaceAPI:
         self.headers = {"Authorization": f"Bearer {api_key}"}
         self.logger = logger or logging.getLogger("HuggingFaceAPI")
         
+    # async def generate(self, prompt: str, max_length: int = 100) -> str:
+    #     """
+    #     Generate text using the HuggingFace API with rate limiting consideration
+    #     """
+    #     try:
+    #         payload = {
+    #             "inputs": prompt,
+    #             "parameters": {
+    #                 "max_length": max_length,
+    #                 "temperature": 0.7,
+    #                 "top_p": 0.95,
+    #                 "repetition_penalty": 1.15
+    #             }
+    #         }
+            
+    #         response = requests.post(self.api_url, headers=self.headers, json=payload)
+            
+    #         if response.status_code == 429:  # Rate limit exceeded
+    #             await asyncio.sleep(60)  # Wait for 1 minute before retrying
+    #             return await self.generate(prompt, max_length)
+                
+    #         if response.status_code != 200:
+    #             raise Exception(f"API request failed with status {response.status_code}: {response.text}")
+                
+    #         return response.json()[0]["generated_text"]
+            
+    #     except Exception as e:
+    #         log_message(self.logger, "error", self, f"Error generating text: {str(e)}")
+    #         return None, []
     async def generate(self, prompt: str, max_length: int = 100) -> str:
         """
         Generate text using the HuggingFace API with rate limiting consideration
@@ -51,15 +80,25 @@ class HuggingFaceAPI:
             if response.status_code == 429:  # Rate limit exceeded
                 await asyncio.sleep(60)  # Wait for 1 minute before retrying
                 return await self.generate(prompt, max_length)
+
+            if response.status_code == 503:
+                # Model is loading; wait for the estimated time plus a small buffer and retry.
+                error_info = response.json()
+                wait_time = error_info.get("estimated_time", 20) + 5  # Adding a 5-second buffer
+                log_message(self.logger, "info", self, f"Model is loading. Waiting for {wait_time} seconds.")
+                await asyncio.sleep(wait_time)
+                return await self.generate(prompt, max_length)
+                
                 
             if response.status_code != 200:
                 raise Exception(f"API request failed with status {response.status_code}: {response.text}")
                 
-            return response.json()[0]["generated_text"]
+            result = response.json()[0]["generated_text"]
+            return result
             
         except Exception as e:
             log_message(self.logger, "error", self, f"Error generating text: {str(e)}")
-            return None, []
+            return None
 
 class Sia:
     def __init__(

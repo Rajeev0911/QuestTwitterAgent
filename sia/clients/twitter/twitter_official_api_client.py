@@ -1043,6 +1043,70 @@ from utils.logging_utils import enable_logging, log_message, setup_logging
 from sia.clients.client_interface import SiaClientInterface
 
 
+class RateLimiter:
+    def __init__(self):
+        # Twitter API rate limits
+        self.post_limit = 1500  # posts per month
+        self.read_limit = 500000  # reads per month
+        self.posts_this_month = 0
+        self.reads_this_month = 0
+        self.last_reset = datetime.now(timezone.utc)
+        
+        # Time windows
+        self.post_window = 60 * 60  # 1 hour between posts
+        self.reply_window = 15 * 60  # 15 minutes between reply checks
+        self.engage_window = 4 * 60 * 60  # 4 hours between engagement checks
+        
+        # Last action timestamps
+        self.last_post = None
+        self.last_reply_check = None
+        self.last_engage = None
+
+    def can_post(self) -> bool:
+        self._check_monthly_reset()
+        if self.posts_this_month >= self.post_limit:
+            return False
+        if self.last_post and datetime.now(timezone.utc) - self.last_post < timedelta(seconds=self.post_window):
+            return False
+        return True
+
+    def can_read(self) -> bool:
+        self._check_monthly_reset()
+        if self.reads_this_month >= self.read_limit:
+            return False
+        return True
+
+    def can_check_replies(self) -> bool:
+        if self.last_reply_check and datetime.now(timezone.utc) - self.last_reply_check < timedelta(seconds=self.reply_window):
+            return False
+        return True
+
+    def can_engage(self) -> bool:
+        if self.last_engage and datetime.now(timezone.utc) - self.last_engage < timedelta(seconds=self.engage_window):
+            return False
+        return True
+
+    def _check_monthly_reset(self):
+        now = datetime.now(timezone.utc)
+        if now.month != self.last_reset.month:
+            self.posts_this_month = 0
+            self.reads_this_month = 0
+            self.last_reset = now
+
+    def record_post(self):
+        self.posts_this_month += 1
+        self.last_post = datetime.now(timezone.utc)
+
+    def record_read(self):
+        self.reads_this_month += 1
+
+    def record_reply_check(self):
+        self.last_reply_check = datetime.now(timezone.utc)
+
+    def record_engage(self):
+        self.last_engage = datetime.now(timezone.utc)
+
+
 class SiaTwitterOfficial(SiaClientInterface):
 
     def __init__(
@@ -1787,21 +1851,37 @@ Tweets:
         if not self.character.platform_settings.get("twitter", {}).get("enabled", True):
             return
 
+        # while True:
+        #     try:
+        #         await self.post()
+        #     except Exception as e:
+        #         log_message(self.logger, "error", self, f"Error posting tweet: {e}")
+
+        #     try:
+        #         await self.reply()
+        #     except Exception as e:
+        #         log_message(self.logger, "error", self, f"Error replying to mentions: {e}")
+
+        #     try:
+        #         await self.engage()
+        #     except Exception as e:
+        #         log_message(self.logger, "error", self, f"Error engaging with tweets: {e}")
+
+        #     # time.sleep(random.randint(70, 90))
+        #     await asyncio.sleep(random.randint(70, 90))
         while True:
             try:
                 await self.post()
-            except Exception as e:
-                log_message(self.logger, "error", self, f"Error posting tweet: {e}")
-
-            try:
+                await asyncio.sleep(60)  # Wait 1 minute before next check
+                
                 await self.reply()
-            except Exception as e:
-                log_message(self.logger, "error", self, f"Error replying to mentions: {e}")
-
-            try:
+                await asyncio.sleep(60)  # Wait 1 minute before next check
+                
                 await self.engage()
+                
+                # Sleep for longer period between cycles
+                await asyncio.sleep(random.randint(300, 600))  # 5-10 minutes
+                
             except Exception as e:
-                log_message(self.logger, "error", self, f"Error engaging with tweets: {e}")
-
-            # time.sleep(random.randint(70, 90))
-            await asyncio.sleep(random.randint(70, 90))
+                log_message(self.logger, "error", self, f"Error in run loop: {e}")
+                await asyncio.sleep(600)  # Sleep for 10 minutes on error
