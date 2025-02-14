@@ -199,8 +199,11 @@ def run_background_bot():
 
 def keep_alive():
     """
-    Periodically pings the local Flask server to prevent Render from considering the service idle.
+    Waits for the server to start, then periodically pings the local Flask server
+    to prevent Render from considering the service idle.
     """
+    # Wait 10 seconds to allow the Flask server to start
+    time.sleep(30)
     while True:
         try:
             port = int(os.environ.get("PORT", 5000))
@@ -209,7 +212,7 @@ def keep_alive():
             logger.info(f"Keep-alive ping to {url} - Status Code: {response.status_code}")
         except Exception as e:
             logger.error(f"Keep-alive request failed: {e}")
-        time.sleep(300)  # Wait for 5 minutes (300 seconds) before next ping
+        time.sleep(300)  # Wait 5 minutes (300 seconds) before next ping
 
 if __name__ == "__main__":
     # Start the bot in a background thread
@@ -217,7 +220,7 @@ if __name__ == "__main__":
     bot_thread.daemon = True
     bot_thread.start()
 
-    # Start the keep-alive thread to periodically ping the server
+    # Start the keep-alive thread
     keep_alive_thread = threading.Thread(target=keep_alive)
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
