@@ -937,15 +937,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
 import asyncio
 import os
 import time
@@ -1342,34 +1333,42 @@ class Sia:
             return None
 
     def run(self):
-        """Run all clients concurrently using threads"""
+        """Run all clients concurrently using threads with robust error handling and auto-restart."""
         threads = []
         
         if self.telegram:
             def run_telegram():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self.telegram.run())
-                except Exception as e:
-                    print(f"Telegram error: {e}")
-                finally:
-                    loop.close()
-                    
+                backoff = 60  # Start with a 60-second backoff
+                while True:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.telegram.run())
+                        backoff = 60  # Reset on success
+                    except Exception as e:
+                        log_message(self.logger, "error", self, f"Telegram error: {e}. Retrying in {backoff} seconds.")
+                        time.sleep(backoff)
+                        backoff = min(backoff * 2, 600)  # Exponential backoff up to 10 minutes
+                    finally:
+                        loop.close()
             telegram_thread = threading.Thread(target=run_telegram, name="telegram_thread")
             threads.append(telegram_thread)
             
         if self.twitter:
             def run_twitter():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self.twitter.run())
-                except Exception as e:
-                    print(f"Twitter error: {e}")
-                finally:
-                    loop.close()
-                    
+                backoff = 60  # Start with a 60-second backoff
+                while True:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.twitter.run())
+                        backoff = 60  # Reset on success
+                    except Exception as e:
+                        log_message(self.logger, "error", self, f"Twitter error: {e}. Retrying in {backoff} seconds.")
+                        time.sleep(backoff)
+                        backoff = min(backoff * 2, 600)  # Exponential backoff up to 10 minutes
+                    finally:
+                        loop.close()
             twitter_thread = threading.Thread(target=run_twitter, name="twitter_thread")
             threads.append(twitter_thread)
             
