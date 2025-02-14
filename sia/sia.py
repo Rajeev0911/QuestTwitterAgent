@@ -1657,7 +1657,7 @@ class Sia:
         {self.character.get_post_examples('general', time_of_day=time_of_day, random_pick=7)}
 
         Your post must be unique and not resemble any previous posts.
-        Please produce a post with at least 100-150 words that is thought-provoking, controversial, funny, philosophical, inspirational, or action-oriented.
+        Please produce a post with at least 100-150 words that is thought-provoking, funny, philosophical, inspirational, or action-oriented.
         Platform: {platform}
         {plugin_prompt}
 
