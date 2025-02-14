@@ -106,9 +106,9 @@
       "username": "techupdate_123",
       "post": {
         "enabled": true,
-        "frequency": 2,
-        "max_posts_per_month": 60,
-        "daily_post_limit": 2,
+        "frequency": 4,
+        "max_posts_per_month": 120,
+        "daily_post_limit": 4,
         "parameters": {
           "length_ranges": ["1-5", "10-15", "20-30"]
         }

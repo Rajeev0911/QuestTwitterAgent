@@ -1555,7 +1555,12 @@ Tweets:
                 sort_order="desc"
             )
             latest_post = latest_post[0] if latest_post else None
-            next_post_time = latest_post.wen_posted + timedelta(hours=24/post_frequency) if latest_post else datetime.now(timezone.utc)-timedelta(seconds=10)
+            if latest_post and latest_post.wen_posted.tzinfo is None:
+                latest_post.wen_posted = latest_post.wen_posted.replace(tzinfo=timezone.utc)
+
+
+            # next_post_time = latest_post.wen_posted + timedelta(hours=24/post_frequency) if latest_post else datetime.now(timezone.utc)-timedelta(seconds=10)
+            next_post_time = (latest_post.wen_posted.astimezone(timezone.utc) + timedelta(hours=24/post_frequency)) if latest_post else datetime.now(timezone.utc) - timedelta(seconds=10)
             log_message(self.logger, "info", self, f"Post frequency: {post_frequency} (every {24/post_frequency} hours)")
             log_message(self.logger, "info", self, f"Latest post: {latest_post}")
             log_message(self.logger, "info", self, f"Next post time: {next_post_time}, datetime.now(timezone.utc): {datetime.now(timezone.utc)}")
@@ -1573,111 +1578,128 @@ Tweets:
             else:
                 log_message(self.logger, "info", self, "No post or media generated.")
 
-            time.sleep(30)
+            # time.sleep(30)
+            await asyncio.sleep(30)
 
     async def reply(self):
         if self.character.responding.get("enabled", True):
             log_message(self.logger, "info", self, "Checking for new replies...")
-
-            since_id = self.get_last_retrieved_reply_id()
-            log_message(self.logger, "info", self, f"Since id: {since_id}")
+            try:
+                since_id = self.get_last_retrieved_reply_id()
+                log_message(self.logger, "info", self, f"Since id: {since_id}")
             
-            replies_search_inputs = {
-                "query": f"to:{self.character.twitter_username} OR @{self.character.twitter_username}",
-                "client": self.client,
-            }
-            if since_id:
-                replies_search_inputs["since_id"] = since_id
-            replies = self.search_tweets(**replies_search_inputs)
-            replies_messages = self.save_tweets_to_db(tweets=replies, exclude_own=True)
+                replies_search_inputs = {
+                    "query": f"to:{self.character.twitter_username} OR @{self.character.twitter_username}",
+                    "client": self.client,
+                }
+                if since_id:
+                    replies_search_inputs["since_id"] = since_id
+            
+                # This call might raise an exception if rate limits are exceeded
+                replies = self.search_tweets(**replies_search_inputs)
+                replies_messages = self.save_tweets_to_db(tweets=replies, exclude_own=True)
 
-            responses_sent = self.memory.get_messages(
-                platform="twitter",
-                character=self.character.name,
-                response_to="NOT NULL",
-                author=self.character.twitter_username,
-                sort_by="wen_posted",
-                sort_order="desc",
-            )
-            responses_sent_this_hour = len(
-                [
-                    r
-                    for r in responses_sent
-                    if r.wen_posted > datetime.now(timezone.utc) - timedelta(hours=1)
-                ]
-            )
-            max_responses_an_hour = self.character.responding.get("responses_an_hour", 3)
-            log_message(
-                self.logger,
-                "info",
-                self,
-                f"Number of responses sent this hour: {responses_sent_this_hour}, max allowed: {max_responses_an_hour}",
-            )
+                responses_sent = self.memory.get_messages(
+                    platform="twitter",
+                    character=self.character.name,
+                    response_to="NOT NULL",
+                    author=self.character.twitter_username,
+                    sort_by="wen_posted",
+                    sort_order="desc",
+                )
+                responses_sent_this_hour = len(
+                    [
+                        r
+                        for r in responses_sent
+                        if r.wen_posted > datetime.now(timezone.utc) - timedelta(hours=1)
+                    ]
+                )
+                max_responses_an_hour = self.character.responding.get("responses_an_hour", 3)
+                log_message(
+                    self.logger,
+                    "info",
+                    self,
+                    f"Number of responses sent this hour: {responses_sent_this_hour}, max allowed: {max_responses_an_hour}",
+                )
 
-            if replies_messages:
-                replies_messages.sort(key=lambda x: random.random())
-                for r in replies_messages:
-                    log_message(self.logger, "info", self, f"Processing reply: {r}")
-                    if r.flagged:
-                        log_message(self.logger, "info", self, f"Skipping flagged reply: {r}")
-                        continue
-                    if responses_sent_this_hour >= max_responses_an_hour:
-                        log_message(
-                            self.logger,
-                            "info",
-                            self,
-                            f"Max number of responses sent this hour reached. Skipping remaining replies.",
+                if replies_messages:
+                    # Shuffle the replies to process them in random order.
+                    replies_messages.sort(key=lambda x: random.random())
+                    for r in replies_messages:
+                        log_message(self.logger, "info", self, f"Processing reply: {r}")
+                        if r.flagged:
+                            log_message(self.logger, "info", self, f"Skipping flagged reply: {r}")
+                            continue
+                        if responses_sent_this_hour >= max_responses_an_hour:
+                            log_message(
+                                self.logger,
+                                "info",
+                                self,
+                                "Max number of responses sent this hour reached. Skipping remaining replies.",
+                            )
+                            break
+
+                        conversation = self.get_conversation(r.conversation_id)
+                        conversation_first_message = self.memory.get_messages(
+                            id=r.conversation_id,
+                            platform="twitter",
+                            not_author=self.character.twitter_username
                         )
-                        break
-
-                    conversation = self.get_conversation(r.conversation_id)
-                    conversation_first_message = self.memory.get_messages(
-                        id=r.conversation_id,
-                        platform="twitter",
-                        not_author=self.character.twitter_username
-                    )
-                    conversation = conversation_first_message + conversation[-20:]
-                    own_messages_count = sum(
-                        1
-                        for msg in conversation
-                        if msg.author == self.character.twitter_username
-                    )
-                    if own_messages_count >= 3:
-                        log_message(
-                            self.logger,
-                            "info",
-                            self,
-                            f"Skipping conversation {r.conversation_id} as it already has {own_messages_count} replies from us.",
+                        conversation = conversation_first_message + conversation[-20:]
+                        own_messages_count = sum(
+                            1
+                            for msg in conversation
+                            if msg.author == self.character.twitter_username
                         )
-                        continue
+                        if own_messages_count >= 3:
+                            log_message(
+                                self.logger,
+                                "info",
+                                self,
+                                f"Skipping conversation {r.conversation_id} as it already has {own_messages_count} replies from us.",
+                            )
+                            continue
 
-                    generated_response = self.sia.generate_response(r)
-                    if not generated_response:
-                        log_message(self.logger, "error", self, f"No response generated")
-                        continue
+                        generated_response = self.sia.generate_response(r)
+                        if not generated_response:
+                            log_message(self.logger, "error", self, "No response generated")
+                            continue
 
-                    tweet_id = self.publish_message(
-                        message=generated_response,
-                        in_reply_to_message_id=r.id
-                    )
-                    self.memory.add_message(
-                        message_id=tweet_id,
-                        message=generated_response,
-                        message_type="reply"
-                    )
-
-                    if isinstance(tweet_id, Forbidden):
-                        log_message(
-                            self.logger,
-                            "error",
-                            self,
-                            f"Failed to send reply: {tweet_id}. Sleeping for 10 minutes.",
+                        tweet_id = self.publish_message(
+                            message=generated_response,
+                            in_reply_to_message_id=r.id
                         )
-                        time.sleep(600)
+                        self.memory.add_message(
+                            message_id=tweet_id,
+                            message=generated_response,
+                            message_type="reply"
+                        )
 
-                    time.sleep(random.randint(70, 90))
-            else:
-                log_message(self.logger, "info", self, "No new replies yet.")
+                        if isinstance(tweet_id, Forbidden):
+                            log_message(
+                                self.logger,
+                                "error",
+                                self,
+                                f"Failed to send reply: {tweet_id}. Sleeping for 10 minutes.",
+                            )
+                            await asyncio.sleep(600)
+
+                        # Use asynchronous sleep instead of blocking time.sleep
+                        await asyncio.sleep(random.randint(70, 90))
+                else:
+                    log_message(self.logger, "info", self, "No new replies yet.")
+        
+            except Exception as e:
+                # Check if the exception is due to rate limiting.
+                if hasattr(e, 'response') and e.response is not None and "x-rate-limit-reset" in e.response.headers:
+                    reset_time = int(e.response.headers.get("x-rate-limit-reset", time.time() + 600))
+                    current_time = time.time()
+                    wait_time = max(reset_time - current_time, 60)
+                    log_message(self.logger, "info", self, f"Rate limit exceeded. Sleeping for {wait_time} seconds.")
+                    await asyncio.sleep(wait_time)
+                else:
+                    log_message(self.logger, "error", self, f"Error in reply: {e}")
+
 
     async def engage(self, testing_rounds=3, search_period_hours=24):
         log_message(self.logger, "info", self, "Checking for tweets to engage with...")
@@ -1872,10 +1894,14 @@ Tweets:
         while True:
             try:
                 await self.post()
-                await asyncio.sleep(60)  # Wait 1 minute before next check
+                # await asyncio.sleep(60)  # Wait 1 minute before next check
+                await asyncio.sleep(random.randint(300, 600))  # Wait 5-10 minutes
+
                 
                 await self.reply()
-                await asyncio.sleep(60)  # Wait 1 minute before next check
+                # await asyncio.sleep(60)  # Wait 1 minute before next check
+                await asyncio.sleep(random.randint(300, 600))  # Wait 5-10 minutes
+                
                 
                 await self.engage()
                 
