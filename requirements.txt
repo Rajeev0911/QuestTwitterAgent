@@ -21,8 +21,8 @@ langchain==0.3.8
 langchain-openai==0.2.9
 langchain-anthropic==0.3.0
 langchain_community==0.3.8
-openai==1.12.0
-pydantic>=2.7.4,<3.0.0  # Specified version range to match langchain requirements
+openai>=1.54.0,<2.0.0  # Updated to match langchain-openai requirements
+pydantic>=2.7.4,<3.0.0
 
 # Database Dependencies
 alembic==1.14.0
