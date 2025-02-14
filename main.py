@@ -382,7 +382,7 @@ if __name__ == "__main__":
         log_message(logger, "info", "Main", "Keep-alive thread started")
         
         # Get port from environment
-        port = int(os.environ.get("PORT", 5000))
+        port = int(os.environ.get("PORT", 10000))
         log_message(logger, "info", "Main", f"Starting Flask server on port {port}")
         
         # Run Flask app
