@@ -1652,25 +1652,24 @@ class Sia:
         news_prompt = f"News Headlines: {', '.join(news_headlines)}" if news_headlines else ""
         
         prompt = f"""
-    You are Quest, an AI agent. Do not repeat your introductory statement.
-    Previous post examples:
-    {self.character.get_post_examples('general', time_of_day=time_of_day, random_pick=7)}
+        You are Quest, an AI agent. Do not repeat your introductory statement.
+        Previous post examples:
+        {self.character.get_post_examples('general', time_of_day=time_of_day, random_pick=7)}
 
-    Your post must be unique and not resemble any previous posts.
-    Platform: {platform}
-    {plugin_prompt}
+        Your post must be unique and not resemble any previous posts.
+        Please produce a post with at least 100-150 words that is thought-provoking, controversial, funny, philosophical, inspirational, or action-oriented.
+        Platform: {platform}
+        {plugin_prompt}
 
-    Trending Topics: {keywords_str}
-    {news_prompt}
+        Trending Topics: {keywords_str}
+        {news_prompt}
 
-    Core objective: {self.character.core_objective}
-    Means for achieving core objective: {self.character.means_for_achieving_core_objective}
-
-    Generate a {platform} post (10-30 words) that is thought-provoking, controversial, funny, philosophical, inspirational, or action-oriented.
+        Core objective: {self.character.core_objective}
+        Means for achieving core objective: {self.character.means_for_achieving_core_objective}
         """
 
         try:
-            result = await self.llm.generate(prompt, max_length=50)
+            result = await self.llm.generate(prompt, max_length=150)
             post_content = result[0] if isinstance(result, (list, tuple)) else result
 
             if not post_content or not isinstance(post_content, str):
@@ -1708,10 +1707,10 @@ class Sia:
         Optionally, generate an accompanying image/meme.
         """
         prompt = f"""
-    You are Quest, an engaging AI agent.
-    Generate a short interactive post (10-30 words) that asks a thought-provoking question or invites feedback.
-    Core objective: {self.character.core_objective}
-    """
+        You are Quest, an engaging AI agent.
+        Generate a short interactive post (10-30 words) that asks a thought-provoking question or invites feedback.
+        Core objective: {self.character.core_objective}
+        """
         try:
             result = await self.llm.generate(prompt, max_length=50)
             post_content = result[0] if isinstance(result, (list, tuple)) else result
