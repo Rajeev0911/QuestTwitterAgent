@@ -1439,9 +1439,6 @@ load_dotenv()
 
 class HuggingFaceAPI:
     def __init__(self, api_key: str, model_id: str = "google/flan-t5-large", logger=None):
-        """
-        Initialize HuggingFace API client with a larger model for improved quality.
-        """
         self.api_key = api_key
         self.model_id = model_id
         self.api_url = f"https://api-inference.huggingface.co/models/{model_id}"
@@ -1449,10 +1446,6 @@ class HuggingFaceAPI:
         self.logger = logger or logging.getLogger("HuggingFaceAPI")
         
     async def generate(self, prompt: str, max_length: int = 100, retries: int = 0) -> str:
-        """
-        Generate text using the HuggingFace API with rate limiting consideration.
-        Implements exponential backoff for repeated calls.
-        """
         max_retries = 5
         try:
             payload = {
@@ -1466,22 +1459,34 @@ class HuggingFaceAPI:
             }
             response = requests.post(self.api_url, headers=self.headers, json=payload)
             
-            if response.status_code == 429:  # Rate limit exceeded
-                wait_time = 60 * (2 ** retries)  # Exponential backoff
+            # Handle rate limit errors
+            if response.status_code == 429:
+                wait_time = 60 * (2 ** retries)
                 log_message(self.logger, "info", self, f"Rate limit exceeded. Waiting for {wait_time} seconds (retry {retries+1}).")
                 await asyncio.sleep(wait_time)
                 if retries < max_retries:
                     return await self.generate(prompt, max_length, retries=retries+1)
                 else:
                     raise Exception("Maximum retries reached due to rate limiting.")
-                    
+            
+            # Handle 503 (model loading) errors
             if response.status_code == 503:
                 error_info = response.json()
-                wait_time = error_info.get("estimated_time", 20) + 5  # Add a 5-second buffer
+                wait_time = error_info.get("estimated_time", 20) + 5
                 log_message(self.logger, "info", self, f"Model is loading. Waiting for {wait_time} seconds.")
                 await asyncio.sleep(wait_time)
                 return await self.generate(prompt, max_length, retries=retries+1)
-                
+            
+            # Handle 500 error when model is busy
+            if response.status_code == 500 and "Model too busy" in response.text:
+                wait_time = 65 * (2 ** retries)  # Start with ~65 seconds (60 + buffer)
+                log_message(self.logger, "info", self, f"Model too busy. Waiting for {wait_time} seconds (retry {retries+1}).")
+                await asyncio.sleep(wait_time)
+                if retries < max_retries:
+                    return await self.generate(prompt, max_length, retries=retries+1)
+                else:
+                    raise Exception("Maximum retries reached due to model overload.")
+            
             if response.status_code != 200:
                 raise Exception(f"API request failed with status {response.status_code}: {response.text}")
                 
@@ -1491,6 +1496,7 @@ class HuggingFaceAPI:
         except Exception as e:
             log_message(self.logger, "error", self, f"Error generating text: {str(e)}")
             return None
+
 
 class TwitterTrendingFetcher:
     def __init__(self, bearer_token: str):
