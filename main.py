@@ -241,7 +241,7 @@ import threading
 import time
 import requests
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, jsonify
 from utils.logging_utils import enable_logging, setup_logging
 from sia.sia import Sia
 
@@ -256,66 +256,33 @@ enable_logging(logging_enabled)
 # Create a minimal Flask app
 app = Flask(__name__)
 
-# More conservative rate limiting configuration
-RATE_LIMIT_CONFIG = {
-    "tweets_per_15m": 30,     # Conservative limit (instead of 900)
-    "tweets_per_hour": 100,   # Hourly limit
-    "reset_window": 900,      # 15 minutes in seconds
-    "min_interval": 30,       # Minimum 30 seconds between requests
-    "max_retries": 3,         # Maximum number of retry attempts
-    "backoff_factor": 1.5     # Exponential backoff multiplier
-}
+@app.route("/")
+def home():
+    return "Twitter Agent Bot is running!"
 
-class RateLimiter:
-    def __init__(self, limit_per_window, window_seconds, min_interval):
-        self.limit = limit_per_window
-        self.window = window_seconds
-        self.min_interval = min_interval
-        self.tokens = limit_per_window
-        self.last_request = 0
-        self.last_update = time.time()
+@app.route("/health")
+def health_check():
+    """Additional endpoint for health checks"""
+    return jsonify({"status": "healthy", "timestamp": time.time()})
+
+class TwitterRateManager:
+    def __init__(self):
+        self.last_request_time = 0
+        self.min_interval = 30  # 30 seconds between requests
         self.lock = threading.Lock()
 
-    async def acquire(self):
-        while True:
-            with self.lock:
-                now = time.time()
-                
-                # Enforce minimum interval between requests
-                time_since_last_request = now - self.last_request
-                if time_since_last_request < self.min_interval:
-                    await asyncio.sleep(self.min_interval - time_since_last_request)
-                    continue
-
-                # Replenish tokens
-                time_passed = now - self.last_update
-                self.tokens = min(
-                    self.limit,
-                    self.tokens + int((time_passed * self.limit) / self.window)
-                )
-                self.last_update = now
-                
-                if self.tokens > 0:
-                    self.tokens -= 1
-                    self.last_request = now
-                    return
+    async def wait_if_needed(self):
+        with self.lock:
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
             
-            # Calculate sleep time if no tokens available
-            sleep_time = max(
-                self.min_interval,
-                (self.window / self.limit) * RATE_LIMIT_CONFIG["backoff_factor"]
-            )
-            logger.info(f"Rate limit reached. Waiting {sleep_time:.2f} seconds")
-            await asyncio.sleep(sleep_time)
+            if time_since_last < self.min_interval:
+                wait_time = self.min_interval - time_since_last
+                await asyncio.sleep(wait_time)
+            
+            self.last_request_time = time.time()
 
 async def run_bot():
-    # Create rate limiter with conservative limits
-    tweet_limiter = RateLimiter(
-        RATE_LIMIT_CONFIG["tweets_per_15m"],
-        RATE_LIMIT_CONFIG["reset_window"],
-        RATE_LIMIT_CONFIG["min_interval"]
-    )
-    
     while True:
         try:
             character_name_id = os.getenv("CHARACTER_NAME_ID")
@@ -342,20 +309,34 @@ async def run_bot():
             sia = Sia(
                 character_json_filepath=f"characters/{character_name_id}.json",
                 huggingface_api_key=huggingface_api_key,
-                rate_limiter=tweet_limiter,
                 **client_creds,
                 memory_db_path=os.getenv("DB_PATH"),
                 logging_enabled=logging_enabled,
             )
             
+            # Add rate manager to twitter client if it exists
             if sia.twitter:
-                sia.twitter.rate_limiter = tweet_limiter
+                sia.twitter.rate_manager = TwitterRateManager()
+                
+                # Monkey patch the post method to include rate limiting
+                original_post = sia.twitter.post
+                async def rate_limited_post(*args, **kwargs):
+                    await sia.twitter.rate_manager.wait_if_needed()
+                    return await original_post(*args, **kwargs)
+                sia.twitter.post = rate_limited_post
+                
+                # Monkey patch the reply method to include rate limiting
+                original_reply = sia.twitter.reply
+                async def rate_limited_reply(*args, **kwargs):
+                    await sia.twitter.rate_manager.wait_if_needed()
+                    return await original_reply(*args, **kwargs)
+                sia.twitter.reply = rate_limited_reply
             
             await sia.run()
             
         except Exception as e:
             if "Rate limit exceeded" in str(e):
-                wait_time = RATE_LIMIT_CONFIG["min_interval"] * RATE_LIMIT_CONFIG["backoff_factor"]
+                wait_time = 300  # 5 minutes
                 logger.warning(f"Rate limit exceeded. Waiting {wait_time} seconds before retry...")
                 await asyncio.sleep(wait_time)
             else:
@@ -378,7 +359,7 @@ def keep_alive():
     time.sleep(30)
     while True:
         try:
-            port = int(os.environ.get("PORT", 5000))
+            port = int(os.environ.get("PORT", 10000))  # Changed to match your port
             url = f"http://127.0.0.1:{port}/health"
             response = requests.get(url, timeout=10)
             logger.info(f"Keep-alive ping successful - Status: {response.status_code}")
@@ -388,13 +369,16 @@ def keep_alive():
             time.sleep(300)
 
 if __name__ == "__main__":
+    # Start the bot in a background thread
     bot_thread = threading.Thread(target=run_background_bot)
     bot_thread.daemon = True
     bot_thread.start()
 
+    # Start the keep-alive thread
     keep_alive_thread = threading.Thread(target=keep_alive)
     keep_alive_thread.daemon = True
     keep_alive_thread.start()
 
-    port = int(os.environ.get("PORT", 5000))
+    # Start the Flask app with the correct port
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
